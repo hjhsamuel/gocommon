@@ -2,10 +2,11 @@ package database
 
 import (
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/sirupsen/logrus"
 )
 
 type BackendConfig struct {
@@ -79,4 +80,56 @@ type MysqlOptions struct {
 type MysqlDialector struct {
 	SourceInfo
 	Objs []any
+}
+
+type MongoConfig struct {
+	Debug        bool              `yaml:"debug" env:"DEBUG"`
+	MaxIdleConns uint64            `yaml:"max_idle_conn" env:"MAXIDLECONN"`
+	MinIdleConns uint64            `yaml:"min_idle_conn" env:"MINIDLECONN"`
+	MaxIdleTime  string            `yaml:"max_idle_time" env:"MAXIDLETIME"`
+	User         string            `yaml:"user" env:"USER"`
+	Passwd       string            `yaml:"passwd" env:"PASSWD"`
+	Addr         []*MongoAddr      `yaml:"addr" env:"ADDR"`
+	DB           string            `yaml:"db" env:"DB"`
+	Opts         map[string]string `yaml:"opts" env:"OPTS"`
+}
+
+type MongoAddr struct {
+	Host string `yaml:"host" env:"HOST"`
+	Port int    `yaml:"port" env:"PORT"`
+}
+
+func (m *MongoAddr) UnmarshalText(text []byte) error {
+	reflectMap := make(map[string]string)
+	t := reflect.TypeOf(*m)
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		tagName := field.Tag.Get("env")
+		reflectMap[tagName] = field.Name
+	}
+
+	v := reflect.ValueOf(m).Elem()
+
+	parts := strings.Split(string(text), "|")
+	for _, part := range parts {
+		index := strings.Index(part, "=")
+		if index == -1 {
+			return fmt.Errorf("invalid MongoAddr: %s", part)
+		}
+		if name, ok := reflectMap[part[:index]]; ok {
+			if field, rok := t.FieldByName(name); rok {
+				switch field.Type.Kind() {
+				case reflect.String:
+					v.FieldByName(name).SetString(part[index+1:])
+				case reflect.Int:
+					intVal, err := strconv.Atoi(part[index+1:])
+					if err != nil {
+						return err
+					}
+					v.FieldByName(name).SetInt(int64(intVal))
+				}
+			}
+		}
+	}
+	return nil
 }
